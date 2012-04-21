@@ -1,4 +1,3 @@
-#define XINPUT_USE_9_1_0 TRUE
 #include "stdafx.h"
 #include "utils.h"
 #include "extern.h"
@@ -7,6 +6,7 @@
 #include <windowsx.h>
 
 bool didinit = false;
+bool hhkm_ext = false;
 HWND hWin = NULL;
 DWORD PID = NULL;
 int currentUser = -1;
@@ -33,47 +33,34 @@ bool mmousedown = false;
 
 LRESULT CALLBACK wireKeyboardProc(int code,WPARAM wParam,LPARAM lParam)
 {
-	if(code == HC_ACTION)
-	{
+	if(code == HC_ACTION) {
 		DWORD vkCode = (DWORD) wParam;
 		int oldUser = currentUser;
 		
-		if (GetForegroundWindow() != hWin || vkCode == VK_MENU)
-		{
+		if (GetForegroundWindow() != hWin || vkCode == VK_MENU) {
 			return CallNextHookEx(hhk,code,wParam,lParam);
 		}
 
-		if (vkCode==VK_F2)
-		{
-			currentUser = 0;		
-		}
-		if (vkCode==VK_F3)
-		{
-			currentUser = 1;		
-		}
-		if (vkCode==VK_F4)
-		{
-			currentUser = 2;		
-		}
+        switch (vkCode) {
+			case VK_F2: currentUser = 0;  break;
+			case VK_F3: currentUser = 1;  break;
+			case VK_F4: currentUser = 2;  break;
+        }
+
 		if (currentUser == -1)
-		{	
 			return CallNextHookEx(hhk,code,wParam,lParam);
-		}
 		else
-		{
-			if (vkCode==VK_F1)
-			{
-				currentUser = -1;		
-			}
-		}
-		if (oldUser != currentUser)
-		{
+			if (vkCode == VK_F1) currentUser = -1;
+
+
+		if (oldUser != currentUser) {
 			GetWindowRect(hWin, &rcWind);
 			middlex = rcWind.left+((rcWind.right-rcWind.left)/2);
 			middley = rcWind.top+((rcWind.bottom-rcWind.top)/2);
-			if (currentUser == -1){
+
+			if (currentUser == -1) {
 				SetCursorPos(storex, storey);
-			}else{
+			} else {
 				SetCursorPos(middlex, middley);
 			}
 		}
@@ -83,52 +70,40 @@ LRESULT CALLBACK wireKeyboardProc(int code,WPARAM wParam,LPARAM lParam)
 }
 
 LRESULT CALLBACK mouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
-	
+
 	if (GetForegroundWindow() != hWin) return CallNextHookEx(hhkm, nCode, wParam, lParam);
-	
+
 	PMSLLHOOKSTRUCT p = reinterpret_cast<PMSLLHOOKSTRUCT>( lParam );
-	if(currentUser != -1)
-	{
-		if (wParam == WM_MOUSEMOVE) {
-			mouseposx = middlex - p->pt.x;
-			mouseposy = middley -  p->pt.y;
-		}
-		else if (wParam == WM_LBUTTONDOWN)
-		{
-			lmousedown = true;
-		}
-		else if (wParam == WM_LBUTTONUP)
-		{
-			lmousedown = false;
-		}
-		else if (wParam == WM_MBUTTONDOWN)
-		{
-			mmousedown = true;
-		}
-		else if (wParam == WM_MBUTTONUP)
-		{
-			mmousedown = false;
-		}
-		else if (wParam == WM_RBUTTONDOWN)
-		{
-			rmousedown = true;
-		}
-		else if (wParam == WM_RBUTTONUP)
-		{
-			rmousedown = false;
+
+	if(currentUser != -1) {
+		switch (wParam) {
+			case WM_MOUSEMOVE:
+				mouseposx = middlex - p->pt.x;
+				mouseposy = middley - p->pt.y;
+				break;
+			case WM_LBUTTONDOWN: lmousedown = true;  break;
+			case WM_LBUTTONUP:   lmousedown = false; break;
+			case WM_MBUTTONDOWN: mmousedown = true;  break;
+			case WM_MBUTTONUP:   mmousedown = false; break;
+			case WM_RBUTTONDOWN: rmousedown = true;  break;
+			case WM_RBUTTONUP:   rmousedown = false; break;
 		}
 		return 1;
+	} else {
+		UnhookWindowsHookEx(hhkm);
+		hhkm_ext = false;
 	}
+
 	storex = p->pt.x;
 	storey = p->pt.y;
+
 	return CallNextHookEx(hhkm, nCode, wParam, lParam);
 }
 
 BOOL CALLBACK findWindowByPID(HWND hwnd, LPARAM targetPID) {
 	DWORD wndPID;
 	GetWindowThreadProcessId (hwnd, &wndPID);
-	if (wndPID == targetPID)
-	{
+	if (wndPID == targetPID) {
 		hWin = hwnd;
 		return false;
 	}
@@ -138,17 +113,16 @@ BOOL CALLBACK findWindowByPID(HWND hwnd, LPARAM targetPID) {
 inline bool Initialize() 
 {
 	if (hWin == NULL) EnumWindows(findWindowByPID,GetCurrentProcessId());
-	if (hDLL != NULL)
-	{
+	if (hDLL != NULL) {
 		hhk = SetWindowsHookEx(WH_KEYBOARD, wireKeyboardProc, hDLL, NULL);
 		hhkm = SetWindowsHookEx(WH_MOUSE_LL, mouseHookProc, hDLL, NULL);
+		hhkm_ext = true;
 	}
 	GetWindowRect(hWin, &rcWind);
 	middlex = rcWind.left+((rcWind.right-rcWind.left)/2);
 	middley = rcWind.top+((rcWind.bottom-rcWind.top)/2);
 	return !FAILED( InitDirectInput(hWin) );
 }
-
 
 
 inline bool KeyDown(char* buffer, int key) {
@@ -160,6 +134,11 @@ DWORD WINAPI XInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState)
 {
 	if (!didinit) {
 		didinit = Initialize();
+	}
+
+	if (currentUser != -1 && hDLL != NULL && !hhkm_ext) {
+		hhkm = SetWindowsHookEx(WH_MOUSE_LL, mouseHookProc, hDLL, NULL);
+		hhkm_ext = true;
 	}
 
 	if (dwUserIndex > 2) return ERROR_DEVICE_NOT_CONNECTED;
@@ -182,8 +161,7 @@ DWORD WINAPI XInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState)
 
 	if (!PollKeyboard(diks)) return ERROR_SUCCESS;
 
-	if (currentUser == dwUserIndex)
-	{
+	if (currentUser == dwUserIndex) {
 		SetCursorPos(middlex, middley);
 
 		if (KeyDown(diks,DIK_W)) Gamepad.sThumbLY = 32767;
@@ -202,13 +180,10 @@ DWORD WINAPI XInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState)
 		if (KeyDown(diks,DIK_3)) Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_UP;
 		if (KeyDown(diks,DIK_4)) Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_RIGHT;
 
-		if (KeyDown(diks,DIK_LSHIFT))
-		{
+		if (KeyDown(diks,DIK_LSHIFT)) {
 			Gamepad.sThumbLX = clamp((-mouseposx)*1500,-32767, 32767);
 			Gamepad.sThumbLY = clamp(mouseposy*1500, -32767, 32767);
-		}
-		else
-		{
+		} else {
 			Gamepad.sThumbRX = clamp((-mouseposx)*1500,-32767, 32767);
 			Gamepad.sThumbRY = clamp(mouseposy*1500, -32767, 32767);
 		}
@@ -216,9 +191,7 @@ DWORD WINAPI XInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState)
 		if (mmousedown) Gamepad.wButtons |= XINPUT_GAMEPAD_RIGHT_SHOULDER;
 		if (lmousedown) Gamepad.bRightTrigger = 255;
 		if (rmousedown) Gamepad.bLeftTrigger = 255;
-		
 	}
-
 
 	return ERROR_SUCCESS;
 }
